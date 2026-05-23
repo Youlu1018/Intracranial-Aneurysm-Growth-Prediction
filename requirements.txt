@@ -2,6 +2,4 @@ streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 joblib>=1.3.0
-scikit-learn>=1.3.0  # 随机森林模型依赖
-pathlib>=1.0.1       # 路径处理（Python3.4+内置，但显式声明更稳妥）
-warnings>=0.1        # Python内置，无需安装，仅作备注
+scikit-learn>=1.3.0
