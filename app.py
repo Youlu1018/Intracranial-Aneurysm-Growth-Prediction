@@ -8,13 +8,15 @@ import pandas as pd
 import numpy as np
 import joblib
 from pathlib import Path
+import shap
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
 
 # ============ Page Config ============
 st.set_page_config(
-    page_title="Aneurysm Prediction Dashboard",
+    page_title="Intracranial Aneurysm Prediction Dashboard",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -23,49 +25,47 @@ st.set_page_config(
 # ============ Config ============
 MODEL_DIR = Path("rf_model")
 SCALER_DIR = Path("scalerdata")
-SELECTED_FEATURES = ['Aneurysm_Overlap', 'Neck_Center_Distance', 'Parent_Artery_Overlap', 'Diameter']
+SELECTED_FEATURES = ['HD2ND_Ratio', 'Inflow_Angle', 'Oscillatory_Shear_Index_Mean', 'Pressure_Mean']
 
 ALL_SCALER_FEATURES = [
-    'Age', 'ELAPSS', 'Diameter', 'Width', 'Height', 'TraDiameter', 'MaxDiameter',
-    'Diameter2Width_Ratio', 'Volume', 'NeckArea', 'NeckDiameter',
-    'TraD2NeckD_Ratio', 'InFlowAngle', 'Aneurysm_Angle', 'VesselNearDiameter_D1',
-    'VesselFarDiameter_D2', 'VesselMeanDiameter_PD', 'VesselLength_PL',
-    'Undulation_Index', 'Sphericity_Ratio', 'Aspect_Ratio',
-    'Neck_Stenosis_Index', 'Volume2Neck_Ratio', 'Aneurysm_Overlap',
-    'Neck_Center_Distance', 'Centerline_Mean_Distance', 'Parent_Artery_Overlap',
-    'NP_Mean', 'OSI_Mean', 'Pressure_Mean', 'WSS_Mean', 'V2NCD',
-    'Overlap_Pressure'
+    'Age', 'Diameter', 'Width', 'Height', 'HorizDiam', 'MaxDiam', 'D2W_Ratio',
+    'Volume', 'Neck_Surface', 'Neck_Diameter', 'HD2ND_Ratio', 'Inflow_Angle',
+    'Aneurysm_Angle', 'Near_Diam_D1', 'Far_Diam_D2', 'Parent_Artery_Mean_Diam',
+    'Parent_Artery_Length', 'Undulation_Index', 'Size_Ratio', 'Aspect_Ratio',
+    'Nonsphericity_Index', 'V2NS_Ratio', 'Low_Shear_Area_Ratio',
+    'Oscillatory_Shear_Index_Mean', 'Pressure_Mean',
+    'Wall_Shear_Stress_Mean', 'Energy_Loss_Ratio'
 ]
 
 FEATURE_INFO = {
-    'Aneurysm_Overlap': {
-        'label': 'Aneurysm Overlap',
-        'help': 'Degree of aneurysm overlap with surrounding structures',
-        'icon': '🔴'
-    },
-    'Neck_Center_Distance': {
-        'label': 'Neck Center Distance',
-        'help': 'Distance from neck to center point',
+    'HD2ND_Ratio': {
+        'label': 'Horizontal Diameter/Neck Diameter',
+        'help': 'The ratio of the horizontal diameter to the neck diameter of intracranial aneurysm.',
         'icon': '📏'
     },
-    'Parent_Artery_Overlap': {
-        'label': 'Parent Artery Overlap',
-        'help': 'Degree of overlap with parent artery',
-        'icon': '🩸'
+    'Inflow_Angle': {
+        'label': 'Inflow Angle',
+        'help': 'The angle between the direction of blood flow and the direction of the diameter of intracranial aneurysm. (°)',
+        'icon': '📐'
     },
-    'Diameter': {
-        'label': 'Diameter',
-        'help': 'Maximum diameter of the aneurysm (mm)',
+    'Oscillatory_Shear_Index_Mean': {
+        'label': 'OSI (Mean)',
+        'help': 'Hemodynamic parameter of UKnow®: mean Oscillatory Shear Index of intracranial aneurysm.',
+        'icon': '〰️'
+    },
+    'Pressure_Mean': {
+        'label': 'Pressure (Mean)',
+        'help': 'Hemodynamic parameter of UKnow®： mean Pressure.',
         'icon': '⭕'
     }
 }
 
 MODEL_PARAMS = {
-    'n_estimators': 200,
-    'max_features': 2,
-    'max_depth': 5,
-    'min_samples_split': 5,
-    'min_samples_leaf': 2,
+    'n_estimators': 250,
+    'max_features': 'sqrt',
+    'max_depth': 3,
+    'min_samples_split': 50,
+    'min_samples_leaf': 10,
     'random_state': 123,
     'oob_score': True
 }
@@ -93,6 +93,11 @@ def load_model():
 
 scaler = load_scaler()
 model = load_model()
+
+
+@st.cache_resource
+def get_explainer(_model):
+    return shap.TreeExplainer(_model)
 
 # ============ Medical Dashboard CSS ============
 st.markdown("""
@@ -460,7 +465,7 @@ st.markdown(f"""
     </div>
     <div class="kpi-box status-info">
         <div class="kpi-icon">🌲</div>
-        <div class="kpi-value">200</div>
+        <div class="kpi-value">250</div>
         <div class="kpi-label">Estimators</div>
     </div>
 </div>
@@ -512,6 +517,22 @@ with col_input:
     """, unsafe_allow_html=True)
 
     input_values = {}
+
+    feature_ranges = {
+        'HD2ND_Ratio': (0.00, 10.0),
+        'Inflow_Angle': (0.0, 180.0),
+        'Oscillatory_Shear_Index_Mean': (0.0, 1.0),
+        'Pressure_Mean': (0.0, 2000.0)
+    }
+
+    feature_defaults = {
+        'HD2ND_Ratio': 0.8,
+        'Inflow_Angle': 60.0,
+        'Oscillatory_Shear_Index_Mean': 0.3,
+        'Pressure_Mean': 500.0
+
+    }
+
     for feature in SELECTED_FEATURES:
         info = FEATURE_INFO[feature]
         st.markdown(f"""
@@ -525,9 +546,15 @@ with col_input:
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        min_val, max_val = feature_ranges[feature]
+        default_v = feature_defaults[feature]
+
         input_values[feature] = st.number_input(
             f"{info['label']}",
-            value=0.0,
+            value=default_v,
+            min_value=min_val,
+            max_value=max_val,
             format="%.4f",
             key=feature,
             label_visibility="collapsed"
@@ -536,9 +563,13 @@ with col_input:
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     predict_clicked = st.button("🔬 Start Prediction", use_container_width=True)
 
+    if predict_clicked:
+        st.session_state.prediction_made = True
+        st.session_state.input_values = input_values
+
 # ===== Right Column - Results =====
 with col_result:
-    if predict_clicked:
+    if st.session_state.get('prediction_made', False):
         if model is None:
             st.error("Model not loaded. Please check model files.")
         else:
@@ -645,6 +676,117 @@ with col_result:
             </div>
             """, unsafe_allow_html=True)
 
+            # ===== SHAP Analysis Section =====
+            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="section-header">
+                <span class="section-title">SHAP Explainability Analysis</span>
+                <div class="section-line"></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            chart_type = st.selectbox(
+                "Chart Type",
+                ["SHAP Bar Chart", "Waterfall Plot", "Force Plot", "Custom Bar Chart"],
+                key="shap_chart_type"
+            )
+
+            with st.spinner("Computing SHAP values..."):
+                explainer = get_explainer(model)
+                shap_values = explainer.shap_values(X_input)
+
+                # Handle different SHAP output formats
+                if isinstance(shap_values, list):
+                    # Old format: list of arrays [class0, class1, ...]
+                    shap_values_display = shap_values[1]
+                    if isinstance(explainer.expected_value, list):
+                        expected_value = explainer.expected_value[1]
+                    elif isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.size > 1:
+                        expected_value = explainer.expected_value.ravel()[1]
+                    else:
+                        expected_value = explainer.expected_value
+                elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+                    # New format: (n_samples, n_features, n_classes)
+                    shap_values_display = shap_values[:, :, 1]  # positive class (growth)
+                    expected_value = np.asarray(explainer.expected_value).ravel()[1]
+                else:
+                    # Regression or single-class
+                    shap_values_display = shap_values
+                    expected_value = explainer.expected_value
+
+                # Ensure expected_value is a scalar
+                expected_value = np.asarray(expected_value).ravel()[0]
+
+                feature_display_names = [FEATURE_INFO[f]['label'] for f in SELECTED_FEATURES]
+
+            st.markdown(f"""
+            <div style="background:#E0F2F1; padding:10px 16px; border-radius:8px; margin-bottom:16px;
+                        font-size:13px; color:{'#C53030' if expected_value > 0.5 else '#276749'};">
+                <strong>Base Value (Expected):</strong> {expected_value:.4f}
+            </div>
+            """, unsafe_allow_html=True)
+
+            fig, ax = plt.subplots(figsize=(8, 5))
+
+            if chart_type == "SHAP Bar Chart":
+                shap.plots.bar(
+                    shap.Explanation(
+                        values=shap_values_display[0],
+                        base_values=expected_value,
+                        data=X_input[0],
+                        feature_names=feature_display_names
+                    ),
+                    show=False
+                )
+                st.pyplot(fig)
+                plt.clf()
+
+            elif chart_type == "Waterfall Plot":
+                shap.plots.waterfall(
+                    shap.Explanation(
+                        values=shap_values_display[0],
+                        base_values=expected_value,
+                        data=X_input[0],
+                        feature_names=feature_display_names
+                    ),
+                    show=False
+                )
+                st.pyplot(fig)
+                plt.clf()
+
+            elif chart_type == "Force Plot":
+                shap.plots.force(
+                    base_value=expected_value,
+                    shap_values=shap_values_display[0],
+                    features=X_input[0],
+                    feature_names=feature_display_names,
+                    matplotlib=True,
+                    show=False
+                )
+                st.pyplot(plt.gcf())
+                plt.clf()
+
+            elif chart_type == "Custom Bar Chart":
+                values = shap_values_display[0]
+                colors = ['#EF5350' if v > 0 else '#66BB6A' for v in values]
+                bars = ax.barh(feature_display_names, values, color=colors, edgecolor='white')
+                ax.axvline(x=0, color='#2D3748', linewidth=0.8)
+                ax.set_xlabel('SHAP Value (Impact on Model Output)', fontsize=11, color='#718096')
+                ax.set_title('Feature Impact on Prediction', fontsize=13, fontweight='bold', color='#2D3748')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.tick_params(colors='#718096')
+
+                for bar, val in zip(bars, values):
+                    offset = 0.003
+                    x_pos = bar.get_width() + offset if val >= 0 else bar.get_width() - offset
+                    ha = 'left' if val >= 0 else 'right'
+                    ax.text(x_pos, bar.get_y() + bar.get_height() / 2, f'{val:+.4f}',
+                            va='center', ha=ha, fontsize=10, color='#2D3748')
+
+                st.pyplot(fig)
+                plt.clf()
+
             # Scaled Data
             with st.expander("📋 View Scaled Input Data", expanded=False):
                 st.dataframe(
@@ -675,6 +817,6 @@ st.markdown("""
         <span class="info-badge">🔬 Research Use Only</span>
     </div>
     <p>Intracranial Aneurysm Growth Prediction Dashboard v1.0</p>
-    <p>Data reduced to 561 samples | Not for clinical diagnosis</p>
+    <p>Data reduced to 367 samples | Not for clinical diagnosis</p>
 </div>
 """, unsafe_allow_html=True)
