@@ -550,15 +550,18 @@ with col_input:
         min_val, max_val = feature_ranges[feature]
         default_v = feature_defaults[feature]
 
-        input_values[feature] = st.number_input(
+        val = st.number_input(
             f"{info['label']}",
             value=default_v,
-            min_value=min_val,
-            max_value=max_val,
             format="%.4f",
             key=feature,
             label_visibility="collapsed"
         )
+
+        if not (min_val <= val <= max_val):
+            st.error(f"⚠️ Value should be between {min_val} and {max_val}")
+
+        input_values[feature] = val
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     predict_clicked = st.button("🔬 Start Prediction", use_container_width=True)
