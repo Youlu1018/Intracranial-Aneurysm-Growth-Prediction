@@ -486,7 +486,7 @@ with col_input:
         <div style="font-size:14px; color:var(--text-secondary); line-height:1.8;">
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
                 <span style="background:#E0F2F1; color:#00897B; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">1</span>
-                <span>Input the <strong>4 morphological features</strong> of the aneurysm from imaging data</span>
+                <span>Input the <strong>2 morphological and 2 hemodynamic features</strong> of the aneurysm from imaging data</span>
             </div>
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
                 <span style="background:#E0F2F1; color:#00897B; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">2</span>
