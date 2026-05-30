@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 # ============ Config ============
-MODEL_DIR = Path("rf_model")
+MODEL_DIR = Path("modeldata")
 SCALER_DIR = Path("scalerdata")
 SELECTED_FEATURES = ['HD2ND_Ratio', 'Inflow_Angle', 'Oscillatory_Shear_Index_Mean', 'Pressure_Mean']
 
@@ -39,7 +39,7 @@ ALL_SCALER_FEATURES = [
 
 FEATURE_INFO = {
     'HD2ND_Ratio': {
-        'label': 'Horizontal Diameter/Neck Diameter',
+        'label': 'Horizontal Diameter to Neck Diameter',
         'help': 'The ratio of the horizontal diameter to the neck diameter of intracranial aneurysm.',
         'icon': '📏'
     },
@@ -61,11 +61,16 @@ FEATURE_INFO = {
 }
 
 MODEL_PARAMS = {
-    'n_estimators': 250,
-    'max_features': 'sqrt',
+    'class_weight': 'balanced',
+    'colsample_bytree': 0.4,
+    'learning_rate': 0.02,
     'max_depth': 3,
-    'min_samples_split': 50,
-    'min_samples_leaf': 10,
+    'min_child_samples': 20,
+    'n_estimators': 250,
+    'num_leaves': 4,
+    'reg_alpha': 0.5,
+    'reg_lambda': 1.5,
+    'subsample': 0.5,
     'random_state': 123,
     'oob_score': True
 }
@@ -82,7 +87,7 @@ def load_scaler():
 
 @st.cache_resource
 def load_model():
-    model_path = MODEL_DIR / "rf_model.joblib"
+    model_path = MODEL_DIR / "lgb_model.joblib"
     if model_path.exists():
         model = joblib.load(model_path)
         if hasattr(model, 'feature_names_in_'):
@@ -436,7 +441,7 @@ st.markdown("""
 st.markdown("""
 <div class="dashboard-header">
     <h1>🧠 Intracranial Aneurysm Growth Prediction</h1>
-    <p>Clinical Decision Support System | Random Forest Model | SHAP Explainable Analysis</p>
+    <p>Clinical Decision Support System | LightGBM Model | SHAP Explainable Analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -559,7 +564,7 @@ with col_input:
         )
 
         if not (min_val <= val <= max_val):
-            st.error(f"⚠️ Value should be between {min_val} and {max_val}")
+            st.error(f"⚠️ Value must be between {min_val} and {max_val}")
 
         input_values[feature] = val
 
@@ -649,7 +654,7 @@ with col_result:
                 <div class="kpi-box status-success">
                     <div class="kpi-icon">🛡️</div>
                     <div class="kpi-value">{no_growth_prob:.1f}%</div>
-                    <div class="kpi-label">No Growth</div>
+                    <div class="kpi-label">Non-Growth</div>
                 </div>
                 """, unsafe_allow_html=True)
             with m3:
