@@ -441,7 +441,7 @@ st.markdown("""
 st.markdown("""
 <div class="dashboard-header">
     <h1>🧠 Intracranial Aneurysm Growth Prediction</h1>
-    <p>Clinical Decision Support System | LightGBM Model | SHAP Explainable Analysis</p>
+    <p>Clinical Decision Support System | Light Gradient Boosting Machine Model | SHAP Explainable Analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -820,7 +820,7 @@ with col_result:
 st.markdown("""
 <div class="dashboard-footer">
     <div style="margin-bottom:8px;">
-        <span class="info-badge">🧠 RF Model</span>
+        <span class="info-badge">🧠 LightGBM Model</span>
         <span class="info-badge">📊 4 Features</span>
         <span class="info-badge">🔬 Research Use Only</span>
     </div>
