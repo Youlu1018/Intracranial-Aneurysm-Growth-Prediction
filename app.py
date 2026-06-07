@@ -1,8 +1,8 @@
 """
 Intracranial Aneurysm Growth Prediction System
 Modern Medical Dashboard Style - Clean, Hierarchical, Low Cognitive Load
+Model: SVM (RBF Kernel) | 7 Morphological & Hemodynamic Features
 """
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,93 +16,153 @@ warnings.filterwarnings('ignore')
 
 # ============ Page Config ============
 st.set_page_config(
-    page_title="Intracranial Aneurysm Prediction Dashboard",
+    page_title="Aneurysm Prediction Dashboard",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# ============ Config ============
-MODEL_DIR = Path("modeldata")
-SCALER_DIR = Path("scalerdata")
-SELECTED_FEATURES = ['HD2ND_Ratio', 'Inflow_Angle', 'Oscillatory_Shear_Index_Mean', 'Pressure_Mean']
+# ============ File Config ============
+MODEL_PATH = Path("SVMappdata/svm_model.joblib")
+SCALER_PATH = Path("SVMappdata/scaler.joblib")
+TRAIN_DATA_PATH = Path("traindataSVM.csv")
 
-ALL_SCALER_FEATURES = [
-    'Age', 'Diameter', 'Width', 'Height', 'HorizDiam', 'MaxDiam', 'D2W_Ratio',
-    'Volume', 'Neck_Surface', 'Neck_Diameter', 'HD2ND_Ratio', 'Inflow_Angle',
-    'Aneurysm_Angle', 'Near_Diam_D1', 'Far_Diam_D2', 'Parent_Artery_Mean_Diam',
-    'Parent_Artery_Length', 'Undulation_Index', 'Size_Ratio', 'Aspect_Ratio',
-    'Nonsphericity_Index', 'V2NS_Ratio', 'Low_Shear_Area_Ratio',
-    'Oscillatory_Shear_Index_Mean', 'Pressure_Mean',
-    'Wall_Shear_Stress_Mean', 'Energy_Loss_Ratio'
+SELECTED_FEATURES = [
+    'Neck_Diam',
+    'Inflow_Angle',
+    'DP',
+    'UI',
+    'NSI',
+    'OSI_Mean',
+    'EL_Ratio'
 ]
 
 FEATURE_INFO = {
-    'HD2ND_Ratio': {
-        'label': 'Horizontal Diameter to Neck Diameter',
-        'help': 'The ratio of the horizontal diameter to the neck diameter of intracranial aneurysm.',
+    'Neck_Diam': {
+        'label': 'Neck Diameter',
+        'help': 'Morphological parameter: The maximum diameter of the neck plane of intracranial aneurysm.',
         'icon': '📏'
     },
     'Inflow_Angle': {
         'label': 'Inflow Angle',
-        'help': 'The angle between the direction of blood flow and the direction of the diameter of intracranial aneurysm. (°)',
+        'help': 'Morphological parameter: The angle between the direction of blood flow and the direction of the diameter of intracranial aneurysm. (°)',
         'icon': '📐'
     },
-    'Oscillatory_Shear_Index_Mean': {
-        'label': 'OSI (Mean)',
-        'help': 'Hemodynamic parameter of UKnow®: mean Oscillatory Shear Index of intracranial aneurysm.',
+    'DP': {
+        'label': 'Parent Artery Mean Diameter',
+        'help': 'Morphological parameter: Mean diameter of the parent artery.',
+        'icon': '📐'
+    },
+    'UI': {
+        'label': 'Undulation Index',
+        'help': 'Morphological parameter: Undulation Index of intracranial aneurysm.',
+        'icon': '📐'
+    },
+    'NSI': {
+        'label': 'Nonsphericity Index',
+        'help': 'Morphological parameter: Nonsphericity Index of intracranial aneurysm.',
+        'icon': '📐'
+    },
+    'OSI_Mean': {
+        'label': 'Mean Oscillatory Shear Index',
+        'help': 'Hemodynamic parameter: mean Oscillatory Shear Index of intracranial aneurysm.',
         'icon': '〰️'
     },
-    'Pressure_Mean': {
-        'label': 'Pressure (Mean)',
-        'help': 'Hemodynamic parameter of UKnow®： mean Pressure.',
+    'EL_Ratio': {
+        'label': 'Energy Loss Ratio',
+        'help': 'Hemodynamic parameter: Energy Loss Ratio of intracranial aneurysm.',
         'icon': '⭕'
     }
 }
 
-MODEL_PARAMS = {
+SVM_PARAMS = {
+    'C': 0.7,
+    'kernel': 'rbf',
+    'gamma': 0.12,
+    'degree': 2,
+    'tol': 0.001,
     'class_weight': 'balanced',
-    'colsample_bytree': 0.4,
-    'learning_rate': 0.02,
-    'max_depth': 3,
-    'min_child_samples': 20,
-    'n_estimators': 250,
-    'num_leaves': 4,
-    'reg_alpha': 0.5,
-    'reg_lambda': 1.5,
-    'subsample': 0.5,
+    'probability': True,
     'random_state': 123,
-    'oob_score': True
 }
-
 
 # ============ Load Resources ============
 @st.cache_resource
 def load_scaler():
-    scaler_path = SCALER_DIR / "scaler.joblib"
-    if scaler_path.exists():
-        return joblib.load(scaler_path)
-    return None
+    if SCALER_PATH.exists():
+        scaler = joblib.load(SCALER_PATH)
+        return scaler, "✅ Loaded existing scaler from SVMappdata"
+    return _build_scaler_from_training_data()
 
+
+def _build_scaler_from_training_data():
+    from sklearn.preprocessing import StandardScaler
+    if not TRAIN_DATA_PATH.exists():
+        return None, "❌ No scaler available — traindataSVM.csv not found"
+
+    try:
+        df = pd.read_csv(TRAIN_DATA_PATH)
+        scaler = StandardScaler()
+        scaler.fit(df[SELECTED_FEATURES])
+        scaler.feature_names_in_ = np.array(SELECTED_FEATURES)
+        return scaler, "✅ Built new scaler from traindataSVM.csv (7 features)"
+    except Exception as e:
+        return None, f"❌ Failed to build scaler: {e}"
 
 @st.cache_resource
 def load_model():
-    model_path = MODEL_DIR / "lgb_model.joblib"
-    if model_path.exists():
-        model = joblib.load(model_path)
+    if MODEL_PATH.exists():
+        model = joblib.load(MODEL_PATH)
         if hasattr(model, 'feature_names_in_'):
             del model.feature_names_in_
         return model
     return None
 
 
-scaler = load_scaler()
-model = load_model()
+@st.cache_resource
+def get_background_data():
+    if not TRAIN_DATA_PATH.exists():
+        return None
+
+    try:
+        df = pd.read_csv(TRAIN_DATA_PATH)
+        full_data = df[SELECTED_FEATURES].fillna(0).values
+
+        if len(full_data) > 30:
+            return shap.kmeans(full_data, 30)
+        return full_data
+    except Exception as e:
+        st.error(f"❌ Failed to load background data: {e}")
+        return None
 
 
 @st.cache_resource
-def get_explainer(_model):
-    return shap.TreeExplainer(_model)
+def get_explainer():
+    if model is None:
+        return None, "SVM model not loaded"
+
+    bg = background
+    if bg is None:
+        bg = get_background_data()
+    if bg is None:
+        return None, "No background data available — traindataSVM.csv missing"
+
+    if hasattr(bg, 'data'):
+        bg_array = bg.data
+    else:
+        bg_array = bg
+
+    try:
+        explainer = shap.KernelExplainer(model.predict_proba, bg_array)
+        return explainer, None
+    except Exception as e:
+        return None, f"KernelExplainer creation failed: {e}"
+
+
+# ============ Initialize ============
+scaler, scaler_msg = load_scaler()
+model = load_model()
+background = get_background_data()
 
 # ============ Medical Dashboard CSS ============
 st.markdown("""
@@ -129,15 +189,13 @@ st.markdown("""
         --radius-md: 12px;
         --radius-lg: 16px;
     }
-
     /* ===== Main Background ===== */
     .stApp {
         background-color: var(--bg-main);
     }
-
     /* ===== Header ===== */
     .dashboard-header {
-        background: linear-gradient(135deg, #26A69A 0%, #4DB6AC 50%, #80CBC4 100%);
+        background: linear-gradient(135deg, #7C4DFF 0%, #651FFF 50%, #448AFF 100%);
         padding: 28px 40px;
         border-radius: var(--radius-lg);
         margin-bottom: 28px;
@@ -177,7 +235,6 @@ st.markdown("""
         font-size: 14px;
         margin: 0;
     }
-
     /* ===== Cards ===== */
     .card {
         background: var(--bg-card);
@@ -197,12 +254,12 @@ st.markdown("""
         gap: 10px;
         margin-bottom: 20px;
         padding-bottom: 16px;
-        border-bottom: 2px solid #E0F2F1;
+        border-bottom: 2px solid #EDE7F6;
     }
     .card-header-icon {
         width: 36px;
         height: 36px;
-        background: linear-gradient(135deg, #26A69A, #4DB6AC);
+        background: linear-gradient(135deg, #7C4DFF, #651FFF);
         border-radius: 10px;
         display: flex;
         align-items: center;
@@ -215,7 +272,6 @@ st.markdown("""
         font-weight: 600;
         color: var(--text-primary);
     }
-
     /* ===== KPI Value Boxes ===== */
     .kpi-container {
         display: grid;
@@ -244,8 +300,7 @@ st.markdown("""
     .kpi-box.status-good::before { background: var(--success); }
     .kpi-box.status-warning::before { background: var(--warning); }
     .kpi-box.status-danger::before { background: var(--danger); }
-    .kpi-box.status-info::before { background: var(--primary); }
-
+    .kpi-box.status-info::before { background: #7C4DFF; }
     .kpi-icon {
         font-size: 28px;
         margin-bottom: 8px;
@@ -263,7 +318,6 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-
     /* ===== Feature Input Section ===== */
     .feature-group {
         background: #FAFBFC;
@@ -290,7 +344,6 @@ st.markdown("""
         font-size: 11px;
         color: var(--text-muted);
     }
-
     /* ===== Result Cards ===== */
     .result-card {
         background: var(--bg-card);
@@ -307,7 +360,6 @@ st.markdown("""
         border-left: 5px solid var(--success);
         background: linear-gradient(135deg, #F0FFF4 0%, #C6F6D5 100%);
     }
-
     /* ===== Progress Bar ===== */
     .custom-progress {
         height: 12px;
@@ -327,10 +379,9 @@ st.markdown("""
     .custom-progress-fill.success {
         background: linear-gradient(90deg, #66BB6A, #4CAF50);
     }
-
     /* ===== Buttons ===== */
     .stButton > button {
-        background: linear-gradient(135deg, #26A69A 0%, #00897B 100%);
+        background: linear-gradient(135deg, #7C4DFF 0%, #651FFF 100%);
         color: white;
         border: none;
         padding: 14px 28px;
@@ -339,13 +390,12 @@ st.markdown("""
         font-weight: 600;
         width: 100%;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 12px rgba(38, 166, 154, 0.3);
+        box-shadow: 0 4px 12px rgba(124, 77, 255, 0.3);
     }
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(38, 166, 154, 0.4);
+        box-shadow: 0 6px 20px rgba(124, 77, 255, 0.4);
     }
-
     /* ===== Section Headers ===== */
     .section-header {
         display: flex;
@@ -356,14 +406,13 @@ st.markdown("""
     .section-line {
         flex: 1;
         height: 2px;
-        background: linear-gradient(90deg, var(--primary-light), transparent);
+        background: linear-gradient(90deg, #B388FF, transparent);
     }
     .section-title {
         font-size: 18px;
         font-weight: 700;
         color: var(--text-primary);
     }
-
     /* ===== Footer ===== */
     .dashboard-footer {
         text-align: center;
@@ -373,30 +422,27 @@ st.markdown("""
         margin-top: 40px;
     }
     .dashboard-footer a {
-        color: var(--primary);
+        color: #7C4DFF;
         text-decoration: none;
     }
-
     /* ===== Divider ===== */
     .divider {
         height: 1px;
         background: var(--border);
         margin: 24px 0;
     }
-
     /* ===== Model Info Badge ===== */
     .info-badge {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        background: #E0F2F1;
-        color: var(--primary-dark);
+        background: #EDE7F6;
+        color: #651FFF;
         padding: 6px 12px;
         border-radius: 20px;
         font-size: 12px;
         font-weight: 500;
     }
-
     /* ===== Empty State ===== */
     .empty-state {
         text-align: center;
@@ -411,7 +457,6 @@ st.markdown("""
     .empty-state-text {
         font-size: 16px;
     }
-
     /* ===== Parameter Table ===== */
     .param-row {
         display: flex;
@@ -436,42 +481,38 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============ Dashboard Layout ============
-
 # Header
 st.markdown("""
 <div class="dashboard-header">
     <h1>🧠 Intracranial Aneurysm Growth Prediction</h1>
-    <p>Clinical Decision Support System | Light Gradient Boosting Machine Model | SHAP Explainable Analysis</p>
+    <p>Clinical Decision Support System | SVM (RBF Kernel) | SHAP Explainable Analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ===== KPI Section =====
 status_icon = "✅" if model else "❌"
-status_text = "Ready" if model else "Error"
-scaler_icon = "✅" if scaler else "❌"
-scaler_text = "Loaded" if scaler else "Not Found"
-
+scaler_status_icon = "✅" if scaler else "⚠️"
 st.markdown(f"""
 <div class="kpi-container">
     <div class="kpi-box status-{'good' if model else 'danger'}">
         <div class="kpi-icon">🤖</div>
         <div class="kpi-value">{status_icon}</div>
-        <div class="kpi-label">Model Status</div>
+        <div class="kpi-label">SVM Model Status</div>
     </div>
     <div class="kpi-box status-info">
         <div class="kpi-icon">📊</div>
-        <div class="kpi-value">4</div>
+        <div class="kpi-value">7</div>
         <div class="kpi-label">Features</div>
     </div>
     <div class="kpi-box status-{'good' if scaler else 'warning'}">
         <div class="kpi-icon">⚖️</div>
-        <div class="kpi-value">{scaler_icon}</div>
+        <div class="kpi-value">{scaler_status_icon}</div>
         <div class="kpi-label">Scaler</div>
     </div>
     <div class="kpi-box status-info">
-        <div class="kpi-icon">🌲</div>
-        <div class="kpi-value">250</div>
-        <div class="kpi-label">Estimators</div>
+        <div class="kpi-icon">🎯</div>
+        <div class="kpi-value">RBF</div>
+        <div class="kpi-label">SVM Kernel</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -490,22 +531,22 @@ with col_input:
         </div>
         <div style="font-size:14px; color:var(--text-secondary); line-height:1.8;">
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
-                <span style="background:#E0F2F1; color:#00897B; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">1</span>
-                <span>Input the <strong>2 morphological and 2 hemodynamic features</strong> of the aneurysm from imaging data</span>
+                <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">1</span>
+                <span>Input the <strong>7 morphological & hemodynamic features</strong> of the aneurysm</span>
             </div>
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
-                <span style="background:#E0F2F1; color:#00897B; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">2</span>
+                <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">2</span>
                 <span>Click <strong>"Start Prediction"</strong> to run the analysis</span>
             </div>
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
-                <span style="background:#E0F2F1; color:#00897B; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">3</span>
-                <span>Review the <strong>risk assessment</strong> and probability scores</span>
+                <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">3</span>
+                <span>Review the <strong>risk assessment</strong> and SHAP explanation</span>
             </div>
         </div>
         <div style="margin-top:16px; padding-top:16px; border-top:1px solid #E2E8F0;">
             <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
                 <span>💡</span>
-                <span>All values are automatically standardized before prediction</span>
+                <span>Values are standardized before prediction. SVM with probability calibration.</span>
             </div>
         </div>
     </div>
@@ -521,23 +562,27 @@ with col_input:
     </div>
     """, unsafe_allow_html=True)
 
-    input_values = {}
-
     feature_ranges = {
-        'HD2ND_Ratio': (0.00, 10.0),
-        'Inflow_Angle': (0.0, 180.0),
-        'Oscillatory_Shear_Index_Mean': (0.0, 1.0),
-        'Pressure_Mean': (0.0, 2000.0)
+        'Neck_Diam': (0.10, 10.00),
+        'Inflow_Angle': (5.00, 170.00),
+        'DP': (1.00, 6.00),
+        'UI': (0.04, 0.40),
+        'NSI': (0.10, 0.50),
+        'OSI_Mean': (0.001, 0.08),
+        'EL_Ratio': (0.02, 4.00)
     }
 
     feature_defaults = {
-        'HD2ND_Ratio': 0.8,
-        'Inflow_Angle': 60.0,
-        'Oscillatory_Shear_Index_Mean': 0.3,
-        'Pressure_Mean': 500.0
-
+        'Neck_Diam': 2.17,
+        'Inflow_Angle': 91.62,
+        'DP': 2.21,
+        'UI': 0.11,
+        'NSI': 0.11,
+        'OSI_Mean': 0.01,
+        'EL_Ratio': 0.46
     }
 
+    input_values = {}
     for feature in SELECTED_FEATURES:
         info = FEATURE_INFO[feature]
         st.markdown(f"""
@@ -551,61 +596,127 @@ with col_input:
             </div>
         </div>
         """, unsafe_allow_html=True)
-
         min_val, max_val = feature_ranges[feature]
         default_v = feature_defaults[feature]
-
-        val = st.number_input(
+        input_values[feature] = st.number_input(
             f"{info['label']}",
-            value=default_v,
-            format="%.4f",
-            key=feature,
-            label_visibility="collapsed"
+            value = default_v,
+            format = "%.4f",
+            key = feature,
+            label_visibility = "collapsed"
         )
 
-        if not (min_val <= val <= max_val):
-            st.error(f"⚠️ Value must be between {min_val} and {max_val}")
-
-        input_values[feature] = val
+        # Real-time validation
+        if (
+                input_values[feature] < min_val
+                or input_values[feature] > max_val
+        ):
+            st.warning(
+                f"⚠️ {info['label']} is outside the recommended range "
+                f"({min_val:.4f}–{max_val:.4f}). "
+                f"Please verify the entered value."
+            )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     predict_clicked = st.button("🔬 Start Prediction", use_container_width=True)
-
     if predict_clicked:
+        # Input Validation
+        validation_errors = []
+
+        for feature in SELECTED_FEATURES:
+
+            value = input_values[feature]
+            min_val, max_val = feature_ranges[feature]
+
+            if value < min_val or value > max_val:
+                validation_errors.append(
+                    f"{FEATURE_INFO[feature]['label']}: "
+                    f"expected range {min_val:.4f}–{max_val:.4f}, "
+                    f"received {value:.4f}"
+                )
+
+        # Out off Range
+        if validation_errors:
+
+            st.error(
+                """
+                Input validation failed.
+
+                One or more parameters are outside the validated operating range of the prediction model.
+                Predictions generated using out-of-range values may be unreliable.
+
+                Please review the following entries:
+                """
+            )
+
+            for err in validation_errors:
+                st.markdown(f"• {err}")
+
+            st.stop()
+        # Continue Prediction
         st.session_state.prediction_made = True
         st.session_state.input_values = input_values
+
+    # ---- SVM Model Parameters Card ----
+    with st.expander("⚙️ SVM Model Parameters", expanded=False):
+        st.markdown("""
+        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+            Best SVM hyperparameters from grid search optimization:
+        </div>
+        """, unsafe_allow_html=True)
+        for key, val in SVM_PARAMS.items():
+            st.markdown(f"""
+            <div class="param-row">
+                <span class="param-key">{key}</span>
+                <span class="param-value">{val}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ===== Right Column - Results =====
 with col_result:
     if st.session_state.get('prediction_made', False):
         if model is None:
-            st.error("Model not loaded. Please check model files.")
+            st.error("❌ SVM model not found. Please ensure `svm_model.joblib` is in the SVMappdata folder.")
         else:
-            # Prepare data
-            full_input = {feat: 0.0 for feat in ALL_SCALER_FEATURES}
-            for feat in SELECTED_FEATURES:
-                full_input[feat] = input_values[feat]
-            full_input_df = pd.DataFrame([full_input])
+            # ---- Prepare input data ----
+            input_array = np.array([[input_values[f] for f in SELECTED_FEATURES]])
+            input_df = pd.DataFrame(input_array, columns=SELECTED_FEATURES)
 
+            # ---- Apply scaler ----
             if scaler is not None:
-                full_scaled = scaler.transform(full_input_df)
-                full_scaled_df = pd.DataFrame(full_scaled, columns=ALL_SCALER_FEATURES).round(2)
-                input_scaled_df = full_scaled_df[SELECTED_FEATURES].copy()
+                input_scaled = scaler.transform(input_df)
+                input_scaled_df = pd.DataFrame(input_scaled, columns=SELECTED_FEATURES).round(4)
             else:
-                input_scaled_df = pd.DataFrame([input_values])[SELECTED_FEATURES].copy()
+                st.info("ℹ️ No scaler available, using raw input values.")
+                input_scaled_df = input_df.copy()
+                input_scaled = input_array
 
             X_input = input_scaled_df.values
 
-            # Predict
+            # ---- Predict ----
             prediction = model.predict(X_input)[0]
             proba = model.predict_proba(X_input)[0]
-
-            is_growth = prediction == 1
-            confidence = max(proba) * 100
+            #is_growth = prediction == 1
+            #confidence = max(proba) * 100
             growth_prob = proba[1] * 100
             no_growth_prob = proba[0] * 100
 
-            # Result Header
+            is_growth = growth_prob >= 50
+
+            def get_risk_category(prob):
+                if prob < 0.2:
+                    return "Low"
+                elif prob < 0.5:
+                    return "Moderate"
+                elif prob < 0.8:
+                    return "High"
+                else:
+                    return "Very High"
+
+            raw_growth_prob = proba[1]
+            risk_category = get_risk_category(raw_growth_prob)
+
+            # ---- Result Header ----
             st.markdown("""
             <div class="section-header">
                 <span class="section-title">Prediction Results</span>
@@ -613,7 +724,7 @@ with col_result:
             </div>
             """, unsafe_allow_html=True)
 
-            # Main Result Card
+            # ---- Main Result Card ----
             if is_growth:
                 st.markdown(f"""
                 <div class="result-card result-positive">
@@ -621,7 +732,7 @@ with col_result:
                         <span style="font-size:32px;">⚠️</span>
                         <div>
                             <div style="font-size:22px; font-weight:700; color:#C53030;">Aneurysm Growth Risk Detected</div>
-                            <div style="font-size:14px; color:#9B2C2C;">Model indicates high probability of growth</div>
+                            <div style="font-size:14px; color:#9B2C2C;">SVM model indicates high probability of aneurysm growth</div>
                         </div>
                     </div>
                 </div>
@@ -632,21 +743,30 @@ with col_result:
                     <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
                         <span style="font-size:32px;">✅</span>
                         <div>
-                            <div style="font-size:22px; font-weight:700; color:#276749;">No Growth Risk</div>
-                            <div style="font-size:14px; color:#2F855A;">Model indicates low probability of growth</div>
+                            <div style="font-size:22px; font-weight:700; color:#276749;">Low Growth Risk</div>
+                            <div style="font-size:14px; color:#2F855A;">SVM model indicates low probability of aneurysm growth</div>
                         </div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # KPI Metrics
+            # ---- KPI Metrics ----
             m1, m2, m3 = st.columns(3)
             with m1:
+                if risk_category == "Low":
+                    status_cls = "good"
+                elif risk_category == "Moderate":
+                    status_cls = "info"
+                elif risk_category == "High":
+                    status_cls = "warning"
+                else:  # Very High
+                    status_cls = "danger"
+
                 st.markdown(f"""
-                <div class="kpi-box status-{'good' if confidence > 70 else 'warning'}">
-                    <div class="kpi-icon">🎯</div>
-                    <div class="kpi-value">{confidence:.1f}%</div>
-                    <div class="kpi-label">Confidence</div>
+                <div class="kpi-box status-{status_cls}">
+                    <div class="kpi-icon">🏷️</div>
+                    <div class="kpi-value">{risk_category}</div>
+                    <div class="kpi-label">Risk Category</div>
                 </div>
                 """, unsafe_allow_html=True)
             with m2:
@@ -654,19 +774,19 @@ with col_result:
                 <div class="kpi-box status-success">
                     <div class="kpi-icon">🛡️</div>
                     <div class="kpi-value">{no_growth_prob:.1f}%</div>
-                    <div class="kpi-label">Non-Growth</div>
+                    <div class="kpi-label">Stable</div>
                 </div>
                 """, unsafe_allow_html=True)
             with m3:
                 st.markdown(f"""
                 <div class="kpi-box status-{'danger' if growth_prob > 50 else 'info'}">
-                    <div class="kpi-icon">⚡</div>
+                    <div class="kpi-icon">🎯</div>
                     <div class="kpi-value">{growth_prob:.1f}%</div>
-                    <div class="kpi-label">Growth</div>
+                    <div class="kpi-label">Growth Risk</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Probability Bar
+            # ---- Probability Bar ----
             st.markdown(f"""
             <div class="result-card" style="margin-top:20px;">
                 <div style="font-size:14px; font-weight:600; color:var(--text-secondary); margin-bottom:12px;">
@@ -684,124 +804,173 @@ with col_result:
             </div>
             """, unsafe_allow_html=True)
 
-            # ===== SHAP Analysis Section =====
+            # ===== SHAP Explainability Analysis =====
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown("""
             <div class="section-header">
-                <span class="section-title">SHAP Explainability Analysis</span>
+                <span class="section-title">Explainability Analysis</span>
                 <div class="section-line"></div>
             </div>
             """, unsafe_allow_html=True)
 
+            explainer, explainer_error = get_explainer()
+            use_shap = explainer is not None
+            if not use_shap:
+                st.warning(f"⚠️ SHAP not available: {explainer_error}. Using permutation importance instead.")
+
             chart_type = st.selectbox(
                 "Chart Type",
-                ["SHAP Bar Chart", "Waterfall Plot", "Force Plot", "Custom Bar Chart"],
+                ["SHAP Bar Chart", "Waterfall Plot", "Force Plot", "Custom Bar Chart"] if use_shap
+                else ["Permutation Importance", "Custom Bar Chart"],
                 key="shap_chart_type"
             )
 
-            with st.spinner("Computing SHAP values..."):
-                explainer = get_explainer(model)
-                shap_values = explainer.shap_values(X_input)
+            feature_display_names = [FEATURE_INFO[f]['label'] for f in SELECTED_FEATURES]
 
-                # Handle different SHAP output formats
-                if isinstance(shap_values, list):
-                    # Old format: list of arrays [class0, class1, ...]
-                    shap_values_display = shap_values[1]
-                    if isinstance(explainer.expected_value, list):
-                        expected_value = explainer.expected_value[1]
-                    elif isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.size > 1:
-                        expected_value = explainer.expected_value.ravel()[1]
-                    else:
-                        expected_value = explainer.expected_value
-                elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
-                    # New format: (n_samples, n_features, n_classes)
-                    shap_values_display = shap_values[:, :, 1]  # positive class (growth)
-                    expected_value = np.asarray(explainer.expected_value).ravel()[1]
-                else:
-                    # Regression or single-class
-                    shap_values_display = shap_values
-                    expected_value = explainer.expected_value
+            # ========== SHAP-based explanation ==========
+            if use_shap:
+                with st.spinner("🔄 Computing SHAP values (KernelExplainer)..."):
+                    try:
+                        shap_values_raw = explainer.shap_values(X_input, nsamples=200)
 
-                # Ensure expected_value is a scalar
-                expected_value = np.asarray(expected_value).ravel()[0]
+                        if isinstance(shap_values_raw, list):
+                            shap_arr = shap_values_raw[1]
+                            shap_vals_1d = shap_arr[0] if shap_arr.ndim == 2 else shap_arr
+                        elif isinstance(shap_values_raw, np.ndarray) and shap_values_raw.ndim == 3:
+                            shap_vals_1d = shap_values_raw[0, :, 1]
+                        elif isinstance(shap_values_raw, np.ndarray) and shap_values_raw.ndim == 2:
+                            shap_vals_1d = shap_values_raw[0]
+                        else:
+                            shap_vals_1d = np.asarray(shap_values_raw).ravel()[:len(SELECTED_FEATURES)]
 
-                feature_display_names = [FEATURE_INFO[f]['label'] for f in SELECTED_FEATURES]
+                        if isinstance(explainer.expected_value, list):
+                            base_val = explainer.expected_value[1]
+                        elif isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.size > 1:
+                            base_val = explainer.expected_value.ravel()[1]
+                        else:
+                            base_val = explainer.expected_value
+                        base_val = float(np.asarray(base_val).ravel()[0])
 
-            st.markdown(f"""
-            <div style="background:#E0F2F1; padding:10px 16px; border-radius:8px; margin-bottom:16px;
-                        font-size:13px; color:{'#C53030' if expected_value > 0.5 else '#276749'};">
-                <strong>Base Value (Expected):</strong> {expected_value:.4f}
-            </div>
-            """, unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div style="background:#EDE7F6; padding:10px 16px; border-radius:8px; margin-bottom:16px;
+                                    font-size:13px; color:{'#C53030' if base_val > 0.5 else '#276749'};">
+                            <strong>Base Value (Expected):</strong> {base_val:.4f}
+                        </div>
+                        """, unsafe_allow_html=True)
 
-            fig, ax = plt.subplots(figsize=(8, 5))
+                        fig, ax = plt.subplots(figsize=(8, 5))
+                        if chart_type == "SHAP Bar Chart":
+                            shap.plots.bar(shap.Explanation(
+                                values=shap_vals_1d, base_values=base_val,
+                                data=X_input[0], feature_names=feature_display_names
+                            ), show=False)
+                            st.pyplot(fig);
+                            plt.clf()
+                        elif chart_type == "Waterfall Plot":
+                            shap.plots.waterfall(shap.Explanation(
+                                values=shap_vals_1d, base_values=base_val,
+                                data=X_input[0], feature_names=feature_display_names
+                            ), show=False)
+                            st.pyplot(fig);
+                            plt.clf()
+                        elif chart_type == "Force Plot":
+                            shap.plots.force(
+                                base_value=base_val, shap_values=shap_vals_1d,
+                                features=X_input[0], feature_names=feature_display_names,
+                                matplotlib=True, show=False
+                            )
+                            st.pyplot(plt.gcf());
+                            plt.clf()
+                        elif chart_type == "Custom Bar Chart":
+                            colors = ['#EF5350' if v > 0 else '#66BB6A' for v in shap_vals_1d]
+                            bars = ax.barh(feature_display_names, shap_vals_1d, color=colors, edgecolor='white')
+                            ax.axvline(x=0, color='#2D3748', linewidth=0.8)
+                            ax.set_xlabel('SHAP Value', fontsize=11, color='#718096')
+                            ax.set_title('Feature Impact on Prediction', fontsize=13, fontweight='bold',
+                                         color='#2D3748')
+                            for spine in ['top', 'right']: ax.spines[spine].set_visible(False)
+                            ax.tick_params(colors='#718096')
+                            for bar, val in zip(bars, shap_vals_1d):
+                                offset = 0.003
+                                x_pos = bar.get_width() + offset if val >= 0 else bar.get_width() - offset
+                                ha = 'left' if val >= 0 else 'right'
+                                ax.text(x_pos, bar.get_y() + bar.get_height() / 2, f'{val:+.4f}',
+                                        va='center', ha=ha, fontsize=10, color='#2D3748')
+                            st.pyplot(fig);
+                            plt.clf()
+                    except Exception as e:
+                        st.error(f"SHAP analysis error: {e}")
 
-            if chart_type == "SHAP Bar Chart":
-                shap.plots.bar(
-                    shap.Explanation(
-                        values=shap_values_display[0],
-                        base_values=expected_value,
-                        data=X_input[0],
-                        feature_names=feature_display_names
-                    ),
-                    show=False
-                )
-                st.pyplot(fig)
-                plt.clf()
+            # ========== Permutation Importance fallback ==========
+            else:
+                with st.spinner("🔄 Computing Permutation Importance..."):
+                    try:
+                        from sklearn.inspection import permutation_importance
 
-            elif chart_type == "Waterfall Plot":
-                shap.plots.waterfall(
-                    shap.Explanation(
-                        values=shap_values_display[0],
-                        base_values=expected_value,
-                        data=X_input[0],
-                        feature_names=feature_display_names
-                    ),
-                    show=False
-                )
-                st.pyplot(fig)
-                plt.clf()
+                        if TRAIN_DATA_PATH.exists():
+                            train_df = pd.read_csv(TRAIN_DATA_PATH)
+                            X_train = train_df[SELECTED_FEATURES].fillna(0).values
+                            y_train = train_df['Outcome'].values
 
-            elif chart_type == "Force Plot":
-                shap.plots.force(
-                    base_value=expected_value,
-                    shap_values=shap_values_display[0],
-                    features=X_input[0],
-                    feature_names=feature_display_names,
-                    matplotlib=True,
-                    show=False
-                )
-                st.pyplot(plt.gcf())
-                plt.clf()
+                            # 标准化训练数据
+                            if scaler is not None:
+                                X_train = scaler.transform(X_train)
 
-            elif chart_type == "Custom Bar Chart":
-                values = shap_values_display[0]
-                colors = ['#EF5350' if v > 0 else '#66BB6A' for v in values]
-                bars = ax.barh(feature_display_names, values, color=colors, edgecolor='white')
-                ax.axvline(x=0, color='#2D3748', linewidth=0.8)
-                ax.set_xlabel('SHAP Value (Impact on Model Output)', fontsize=11, color='#718096')
-                ax.set_title('Feature Impact on Prediction', fontsize=13, fontweight='bold', color='#2D3748')
-                ax.spines['top'].set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.tick_params(colors='#718096')
+                            r = permutation_importance(
+                                model, X_train, y_train,
+                                n_repeats=10, random_state=123, scoring='accuracy'
+                            )
+                        else:
+                            r = None
+                            st.warning("Training data unavailable for permutation importance.")
 
-                for bar, val in zip(bars, values):
-                    offset = 0.003
-                    x_pos = bar.get_width() + offset if val >= 0 else bar.get_width() - offset
-                    ha = 'left' if val >= 0 else 'right'
-                    ax.text(x_pos, bar.get_y() + bar.get_height() / 2, f'{val:+.4f}',
-                            va='center', ha=ha, fontsize=10, color='#2D3748')
+                        if r is not None and chart_type == "Permutation Importance":
+                            fig, ax = plt.subplots(figsize=(8, 5))
+                            sorted_idx = r.importances_mean.argsort()
+                            ax.barh(
+                                [feature_display_names[i] for i in sorted_idx],
+                                r.importances_mean[sorted_idx],
+                                xerr=r.importances_std[sorted_idx],
+                                color='#7C4DFF', edgecolor='white'
+                            )
+                            ax.set_xlabel('Mean Accuracy Decrease', fontsize=11, color='#718096')
+                            ax.set_title('Permutation Feature Importance', fontsize=13, fontweight='bold',
+                                         color='#2D3748')
+                            for spine in ['top', 'right']: ax.spines[spine].set_visible(False)
+                            ax.tick_params(colors='#718096')
+                            st.pyplot(fig);
+                            plt.clf()
+                        elif r is not None and chart_type == "Custom Bar Chart":
+                            importances = r.importances_mean
+                            fig, ax = plt.subplots(figsize=(8, 5))
+                            colors = ['#EF5350' if v > 0 else '#7C4DFF' for v in importances]
+                            bars = ax.barh(feature_display_names, importances, color=colors, edgecolor='white')
+                            ax.set_xlabel('Mean Accuracy Decrease', fontsize=11, color='#718096')
+                            ax.set_title('Permutation Feature Importance', fontsize=13, fontweight='bold',
+                                         color='#2D3748')
+                            for spine in ['top', 'right']: ax.spines[spine].set_visible(False)
+                            ax.tick_params(colors='#718096')
+                            for bar, val in zip(bars, importances):
+                                ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height() / 2,
+                                        f'{val:.4f}', va='center', fontsize=10, color='#2D3748')
+                            st.pyplot(fig);
+                            plt.clf()
+                    except Exception as e:
+                        st.error(f"Permutation importance error: {e}")
+                        st.info("Ensure `traindataSVM.csv` is available with the 'Outcome' column.")
 
-                st.pyplot(fig)
-                plt.clf()
-
-            # Scaled Data
+            # ---- Scaled Data ----
             with st.expander("📋 View Scaled Input Data", expanded=False):
                 st.dataframe(
                     input_scaled_df.style.format("{:.4f}").background_gradient(cmap="YlGnBu"),
                     use_container_width=True
                 )
-
+            # ---- Raw Input ----
+            with st.expander("📝 View Raw Input Values", expanded=False):
+                st.dataframe(
+                    input_df.style.format("{:.4f}"),
+                    use_container_width=True
+                )
     else:
         # Empty State
         st.markdown("""
@@ -816,15 +985,40 @@ with col_result:
         </div>
         """, unsafe_allow_html=True)
 
+# ===== Model Info Sidebar =====
+with st.sidebar:
+    st.markdown("### 🧠 Model Information")
+    st.markdown(f"""
+    - **Model Type:** Support Vector Machine (SVM)
+    - **Kernel:** RBF (γ={SVM_PARAMS['gamma']})
+    - **C:** {SVM_PARAMS['C']}
+    - **Class Weight:** {SVM_PARAMS['class_weight']}
+    - **Features:** {len(SELECTED_FEATURES)}
+    - **Probability:** Enabled
+    ---
+    ### 📊 Feature List
+    """)
+    for feat in SELECTED_FEATURES:
+        info = FEATURE_INFO[feat]
+        st.markdown(f"- {info['icon']} **{info['label']}**")
+    st.markdown("---")
+    scaler_status_color = "green" if scaler else "orange"
+    st.markdown(f"**Scaler:** :{scaler_status_color}[{scaler_msg}]")
+    st.markdown(f"**Model:** :{'green' if model else 'red'}[{'Loaded' if model else 'Not Found'}]")
+    st.markdown("---")
+    st.markdown("### ⚙️ SVM Parameters")
+    for key, val in SVM_PARAMS.items():
+        st.markdown(f"- `{key}` = `{val}`")
+
 # Footer
 st.markdown("""
 <div class="dashboard-footer">
     <div style="margin-bottom:8px;">
-        <span class="info-badge">🧠 LightGBM Model</span>
-        <span class="info-badge">📊 4 Features</span>
+        <span class="info-badge">🧠 SVM · RBF Kernel</span>
+        <span class="info-badge">📊 7 Features</span>
         <span class="info-badge">🔬 Research Use Only</span>
     </div>
-    <p>Intracranial Aneurysm Growth Prediction Dashboard v1.0</p>
-    <p>Data reduced to 367 samples | Not for clinical diagnosis</p>
+    <p>Intracranial Aneurysm Growth Prediction Dashboard v2.0</p>
+    <p>SVM Model · SHAP KernelExplainer · Not for clinical diagnosis</p>
 </div>
 """, unsafe_allow_html=True)
