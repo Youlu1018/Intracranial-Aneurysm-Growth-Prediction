@@ -46,32 +46,32 @@ FEATURE_INFO = {
     'Inflow_Angle': {
         'label': 'Inflow Angle',
         'help': 'Morphological parameter: The angle between the direction of blood flow and the direction of the diameter of intracranial aneurysm. (°)',
-        'icon': '📐'
+        'icon': '🧿'
     },
     'DP': {
-        'label': 'Parent Artery Mean Diameter',
-        'help': 'Morphological parameter: Mean diameter of the parent artery.',
-        'icon': '📐'
+        'label': 'Mean Diameter of Parent Artery',
+        'help': 'Morphological parameter: Mean diameter of the parent artery measured 10 mm proximal and distal to the neck of intracranial arterial aneurysms.',
+        'icon': '🧬'
     },
     'UI': {
         'label': 'Undulation Index',
-        'help': 'Morphological parameter: Undulation Index of intracranial aneurysm.',
-        'icon': '📐'
+        'help': 'Morphological parameter: Undulation index of intracranial aneurysm. (**Rajabzadeh-Oghaz, H.** et al. ***World Neurosurg*** 2018, 119 : e541–e550)',
+        'icon': '🌊'
     },
     'NSI': {
         'label': 'Nonsphericity Index',
-        'help': 'Morphological parameter: Nonsphericity Index of intracranial aneurysm.',
-        'icon': '📐'
+        'help': 'Morphological parameter: Nonsphericity index of intracranial aneurysm. (**Rajabzadeh-Oghaz, H.** et al. ***World Neurosurg*** 2018, 119 : e541–e550)',
+        'icon': '🔘'
     },
     'OSI_Mean': {
         'label': 'Mean Oscillatory Shear Index',
-        'help': 'Hemodynamic parameter: mean Oscillatory Shear Index of intracranial aneurysm.',
-        'icon': '〰️'
+        'help': 'Hemodynamic parameter: Mean oscillatory shear index of intracranial aneurysm.',
+        'icon': '🌀'
     },
     'EL_Ratio': {
         'label': 'Energy Loss Ratio',
-        'help': 'Hemodynamic parameter: Energy Loss Ratio of intracranial aneurysm.',
-        'icon': '⭕'
+        'help': 'Hemodynamic parameter: Energy loss ratio of intracranial aneurysm.',
+        'icon': '⚡'
     }
 }
 
@@ -330,19 +330,14 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 8px;
     }
     .feature-icon {
         font-size: 18px;
     }
     .feature-name {
-        font-size: 13px;
+        font-size: 18px;
         font-weight: 600;
         color: var(--text-primary);
-    }
-    .feature-help {
-        font-size: 11px;
-        color: var(--text-muted);
     }
     /* ===== Result Cards ===== */
     .result-card {
@@ -591,11 +586,17 @@ with col_input:
                 <span class="feature-icon">{info['icon']}</span>
                 <div>
                     <div class="feature-name">{info['label']}</div>
-                    <div class="feature-help">{info['help']}</div>
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        help_text = info['help']
+        st.markdown(
+            f'<span style="font-size:12px; color:#A0AEC0;">{help_text}</span>',
+            unsafe_allow_html=True
+        )
+
         min_val, max_val = feature_ranges[feature]
         default_v = feature_defaults[feature]
         input_values[feature] = st.number_input(
@@ -693,6 +694,18 @@ with col_result:
 
             X_input = input_scaled_df.values
 
+            # st.write("Raw Input:")
+            # st.write(input_df)
+            #
+            # st.write("Scaled Input:")
+            # st.write(input_scaled_df)
+            #
+            # st.write("Scaler Mean:")
+            # st.write(scaler.mean_)
+            #
+            # st.write("Scaler Scale:")
+            # st.write(scaler.scale_)
+
             # ---- Predict ----
             prediction = model.predict(X_input)[0]
             proba = model.predict_proba(X_input)[0]
@@ -701,7 +714,21 @@ with col_result:
             growth_prob = proba[1] * 100
             no_growth_prob = proba[0] * 100
 
+            # st.write("growth_prob:")
+            # st.write(growth_prob)
+
+            #confidence = abs(growth_prob - 50) * 2
             is_growth = growth_prob >= 50
+
+            # st.write("classes =", model.classes_)
+            # st.write("proba =", proba)
+            # st.write("prediction =", prediction)
+            # st.write("X_input =", X_input)
+            # st.write("decision =", model.decision_function(X_input))
+            #
+            # scaler, scaler_msg = load_scaler()
+            # st.write("scaler =", scaler)
+            # st.write("scaler_msg =", scaler_msg)
 
             def get_risk_category(prob):
                 if prob < 0.2:
