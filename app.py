@@ -25,7 +25,7 @@ st.set_page_config(
 # ============ File Config ============
 MODEL_PATH = Path("SVMappdata/svm_model.joblib")
 SCALER_PATH = Path("SVMappdata/scaler.joblib")
-TRAIN_DATA_PATH = Path("traindataSVM.csv")
+TRAIN_DATA_PATH = Path("SVMappdata/traindataSVM.joblib")
 
 SELECTED_FEATURES = [
     'Neck_Diam',
@@ -101,7 +101,7 @@ def _build_scaler_from_training_data():
         return None, "❌ No scaler available — traindataSVM.csv not found"
 
     try:
-        df = pd.read_csv(TRAIN_DATA_PATH)
+        df = joblib.load(TRAIN_DATA_PATH)
         scaler = StandardScaler()
         scaler.fit(df[SELECTED_FEATURES])
         scaler.feature_names_in_ = np.array(SELECTED_FEATURES)
@@ -125,7 +125,7 @@ def get_background_data():
         return None
 
     try:
-        df = pd.read_csv(TRAIN_DATA_PATH)
+        df = joblib.load(TRAIN_DATA_PATH)
         full_data = df[SELECTED_FEATURES].fillna(0).values
 
         if len(full_data) > 30:
@@ -935,7 +935,7 @@ with col_result:
                         from sklearn.inspection import permutation_importance
 
                         if TRAIN_DATA_PATH.exists():
-                            train_df = pd.read_csv(TRAIN_DATA_PATH)
+                            train_df = joblib.load(TRAIN_DATA_PATH)
                             X_train = train_df[SELECTED_FEATURES].fillna(0).values
                             y_train = train_df['Outcome'].values
 
