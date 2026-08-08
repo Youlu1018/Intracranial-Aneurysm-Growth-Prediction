@@ -1,0 +1,10 @@
+# Never publish local Streamlit secrets
+.streamlit/secrets.toml
+secrets.toml
+
+# Exclude legacy unencrypted resources
+SVMappdata/*
+!SVMappdata/svm_deployment_bundle.enc
+
+__pycache__/
+*.py[cod]
