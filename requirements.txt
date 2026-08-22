@@ -1,8 +1,9 @@
 streamlit==1.61.1
 pandas==3.0.3
-numpy==2.4.0
+numpy==2.4.6
 scipy==1.18.0
 joblib==1.5.3
+# Match the version that serialized the final nested-CV SVM artifacts.
 scikit-learn==1.9.0
 matplotlib==3.11.0
 shap==0.51.0
