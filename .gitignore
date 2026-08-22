@@ -1,10 +1,24 @@
-# Never publish local Streamlit secrets
+```gitignore
+# Never publish local Streamlit secrets.
 .streamlit/secrets.toml
 secrets.toml
+.svm_deployment_key_DO_NOT_UPLOAD.txt
+*deployment_key*
 
-# Exclude legacy unencrypted resources
-SVMappdata/*
+# Never publish plaintext serialized assets or patient-level tabular data.
+SVMappdata/*.joblib
+SVMappdata/*.csv
+SVMappdata/*.xlsx
+SVMappdata/*.xls
+
+# Only the encrypted deployment bundle and its non-sensitive manifest belong in
+# the public repository. The app never opens the encrypted source-data archive.
 !SVMappdata/svm_deployment_bundle.enc
+!SVMappdata/svm_deployment_manifest.json
+SVMappdata/traindataSVM.joblib.enc
+SVMappdata/traindataSVM.encryption_manifest.json
 
 __pycache__/
 *.py[cod]
+.pytest_cache/
+```
