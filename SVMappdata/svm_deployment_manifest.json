@@ -1,0 +1,77 @@
+{
+  "bundle_file": "svm_deployment_bundle.enc",
+  "bundle_bytes": 24696,
+  "bundle_sha256": "12fd64f63ef61055a95189802e2872c72438da543bf5a3b52acc17669c2dc0fe",
+  "schema_version": 1,
+  "model": "SVM",
+  "selected_features": [
+    "Alcohol_Use",
+    "Tobbaco_Use",
+    "Diam",
+    "MaxDiam",
+    "Volume",
+    "UI",
+    "NSI"
+  ],
+  "feature_defaults_training_median": {
+    "Alcohol_Use": 0.0,
+    "Tobbaco_Use": 0.0,
+    "Diam": 2.80081,
+    "MaxDiam": 4.90691,
+    "Volume": 15.1405,
+    "UI": 0.177632,
+    "NSI": 0.345773
+  },
+  "feature_ranges_complete_cohort": {
+    "Alcohol_Use": [
+      0.0,
+      1.0
+    ],
+    "Tobbaco_Use": [
+      0.0,
+      1.0
+    ],
+    "Diam": [
+      1.43265,
+      8.80232
+    ],
+    "MaxDiam": [
+      2.45312,
+      13.6368
+    ],
+    "Volume": [
+      1.38736,
+      461.787
+    ],
+    "UI": [
+      0.0408163,
+      0.34375
+    ],
+    "NSI": [
+      0.136346,
+      0.502377
+    ]
+  },
+  "model_parameters": {
+    "C": 2.0,
+    "break_ties": false,
+    "cache_size": 200,
+    "class_weight": "balanced",
+    "coef0": 0.0,
+    "decision_function_shape": "ovr",
+    "degree": 3,
+    "gamma": 0.05,
+    "kernel": "rbf",
+    "max_iter": -1,
+    "probability": true,
+    "random_state": 123,
+    "shrinking": true,
+    "tol": 0.001,
+    "verbose": false
+  },
+  "seed": 123,
+  "requires_app_feature_update": false,
+  "intended_use": "exploratory_research_only_not_for_clinical_diagnosis_treatment_or_patient_management",
+  "outcome_scope": "imaging-detected growth during available follow-up; not a fixed-horizon clinical risk estimate",
+  "validation_scope": "single-center internal validation; independent multicenter and prospective validation required"
+}
