@@ -1,10 +1,13 @@
 """
 Intracranial Aneurysm Growth Prediction System
 Modern Medical Dashboard Style - Clean, Hierarchical, Low Cognitive Load
-Model: SVM (RBF Kernel) | 7 LASSO-selected Morphological Features
+Model: SVM (RBF Kernel) | Features loaded from the final SVM deployment manifest
 """
 import io
+import hashlib
+import json
 import os
+import re
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -19,7 +22,7 @@ warnings.filterwarnings('ignore')
 
 # ============ Page Config ============
 st.set_page_config(
-    page_title="Aneurysm Prediction Dashboard",
+    page_title="Aneurysm Growth Research Prototype",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -27,44 +30,101 @@ st.set_page_config(
 
 # ============ File Config ============
 APP_DIR = Path(__file__).resolve().parent
-MODEL_BUNDLE_PATH = APP_DIR / "SVMappdata" / "svm_deployment_bundle.enc"
+MODEL_MANIFEST_PATH = APP_DIR / "SVMappdata" / "svm_deployment_manifest.json"
 ENCRYPTION_KEY_NAME = "MODEL_ENCRYPTION_KEY"
+LOCAL_KEY_PATH = APP_DIR / ".svm_deployment_key_DO_NOT_UPLOAD.txt"
 
-SELECTED_FEATURES = [
-    'MaxDiam',
-    'Neck_Diam',
-    'H2N_Ratio',
-    'Inflow_Angle',
-    'DP',
-    'UI',
-    'NSI'
-]
 
-FEATURE_INFO = {
+def _load_deployment_manifest():
+    """Load the non-sensitive schema exported with the final SVM model."""
+    if not MODEL_MANIFEST_PATH.exists():
+        raise RuntimeError(f"Deployment manifest not found: {MODEL_MANIFEST_PATH}")
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    required = {
+        "bundle_file",
+        "schema_version",
+        "model",
+        "selected_features",
+        "feature_defaults_training_median",
+        "feature_ranges_complete_cohort",
+        "model_parameters",
+        "bundle_sha256",
+        "bundle_bytes",
+    }
+    missing = required.difference(manifest)
+    if missing:
+        raise RuntimeError(f"Deployment manifest is incomplete: {sorted(missing)}")
+    if manifest["model"] != "SVM":
+        raise RuntimeError("This application accepts the final SVM deployment only")
+    features = manifest["selected_features"]
+    if not features or len(features) != len(set(features)):
+        raise RuntimeError("Deployment manifest has empty or duplicated SVM features")
+    if set(features) != set(manifest["feature_defaults_training_median"]):
+        raise RuntimeError("SVM feature defaults do not match selected_features")
+    if set(features) != set(manifest["feature_ranges_complete_cohort"]):
+        raise RuntimeError("SVM feature ranges do not match selected_features")
+    return manifest
+
+
+def _load_encryption_key():
+    """Load a deployment secret without ever displaying or logging it."""
+    key = os.environ.get(ENCRYPTION_KEY_NAME)
+    if not key:
+        try:
+            key = st.secrets.get(ENCRYPTION_KEY_NAME)
+        except Exception:
+            key = None
+    # Local-only convenience requested for this delivery. The file is ignored
+    # by Git and is never expected to exist in Streamlit Community Cloud.
+    if not key and LOCAL_KEY_PATH.exists():
+        match = re.search(
+            rf"^{ENCRYPTION_KEY_NAME}\s*=\s*['\"]?([A-Za-z0-9_-]{{43}}=)['\"]?\s*$",
+            LOCAL_KEY_PATH.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        key = match.group(1) if match else None
+    return key
+
+
+DEPLOYMENT_MANIFEST = _load_deployment_manifest()
+MODEL_BUNDLE_PATH = APP_DIR / "SVMappdata" / DEPLOYMENT_MANIFEST["bundle_file"]
+REQUIRED_BUNDLE_KEYS = {
+    "model",
+    "scaler",
+    "selected_features",
+    "shap_background",
+    "permutation_importance_mean",
+    "permutation_importance_std",
+}
+
+SELECTED_FEATURES = list(DEPLOYMENT_MANIFEST["selected_features"])
+BINARY_FEATURES = {"Alcohol_Use", "Tobbaco_Use"}.intersection(SELECTED_FEATURES)
+
+FEATURE_INFO_CATALOG = {
+    'Alcohol_Use': {
+        'label': 'Alcohol Use',
+        'help': 'Clinical variable: history of alcohol use (No = 0, Yes = 1).',
+        'icon': '🍷'
+    },
+    'Tobbaco_Use': {
+        'label': 'Tobacco Use',
+        'help': 'Clinical variable: history of tobacco use (No = 0, Yes = 1).',
+        'icon': '🚭'
+    },
+    'Diam': {
+        'label': 'Aneurysm Diameter',
+        'help': 'Morphological parameter: aneurysm diameter (mm).',
+        'icon': '📐'
+    },
     'MaxDiam': {
         'label': 'Maximum Diameter',
         'help': 'Morphological parameter: Maximum diameter of the intracranial aneurysm (mm).',
         'icon': '📏'
     },
-    'Neck_Diam': {
-        'label': 'Neck Diameter',
-        'help': 'Morphological parameter: Maximum diameter of the aneurysm neck plane (mm).',
-        'icon': '📐'
-    },
-    'H2N_Ratio': {
-        'label': 'Height-to-Neck Ratio',
-        'help': 'Morphological parameter: Ratio of aneurysm height to neck diameter.',
-        'icon': '↕️'
-    },
-    'Inflow_Angle': {
-        'label': 'Inflow Angle',
-        'help': 'Morphological parameter: Angle between the parent-vessel flow direction and aneurysm axis (°).',
-        'icon': '📐'
-    },
-    'DP': {
-        'label': 'Mean Diameter of Parent Artery',
-        'help': 'Morphological parameter: Mean parent-artery diameter measured proximal and distal to the aneurysm neck (mm).',
-        'icon': '🩸'
+    'Volume': {
+        'label': 'Aneurysm Volume',
+        'help': 'Morphological parameter: aneurysm volume (mm³).',
+        'icon': '🧊'
     },
     'UI': {
         'label': 'Undulation Index',
@@ -77,39 +137,31 @@ FEATURE_INFO = {
         'icon': '🔷'
     }
 }
-
-SVM_PARAMS = {
-    'C': 2.0,
-    'kernel': 'rbf',
-    'gamma': 0.1,
-    'degree': 3,
-    'tol': 0.001,
-    'class_weight': 'balanced',
-    'probability': True,
-    'random_state': 123,
+FEATURE_INFO = {
+    feature: FEATURE_INFO_CATALOG.get(
+        feature,
+        {
+            "label": feature.replace("_", " "),
+            "help": f"Input feature exported by the final SVM pipeline: {feature}.",
+            "icon": "📊",
+        },
+    )
+    for feature in SELECTED_FEATURES
 }
+
+SVM_PARAMS = dict(DEPLOYMENT_MANIFEST["model_parameters"])
 
 # Observed bounds in the complete 784-case study cohort. These values are
 # validation limits for model use; they are not used to refit the model.
 FEATURE_RANGES = {
-    'MaxDiam': (2.4531, 13.6368),
-    'Neck_Diam': (2.3941, 12.3287),
-    'H2N_Ratio': (0.5573, 1.5707),
-    'Inflow_Angle': (7.7523, 169.8640),
-    'DP': (1.8090, 5.7784),
-    'UI': (0.0408, 0.3438),
-    'NSI': (0.1363, 0.5024),
+    feature: tuple(DEPLOYMENT_MANIFEST["feature_ranges_complete_cohort"][feature])
+    for feature in SELECTED_FEATURES
 }
 
 # Training-set medians provide representative, non-identifying defaults.
 FEATURE_DEFAULTS = {
-    'MaxDiam': 4.9069,
-    'Neck_Diam': 4.5807,
-    'H2N_Ratio': 0.9374,
-    'Inflow_Angle': 87.4629,
-    'DP': 3.6687,
-    'UI': 0.1776,
-    'NSI': 0.3458,
+    feature: float(DEPLOYMENT_MANIFEST["feature_defaults_training_median"][feature])
+    for feature in SELECTED_FEATURES
 }
 
 # ============ Load Resources ============
@@ -119,20 +171,34 @@ def _load_deployment_bundle():
     if not MODEL_BUNDLE_PATH.exists():
         return None, f"Encrypted deployment bundle not found: {MODEL_BUNDLE_PATH.name}"
 
-    key = os.environ.get(ENCRYPTION_KEY_NAME)
-    if not key:
-        try:
-            key = st.secrets.get(ENCRYPTION_KEY_NAME)
-        except Exception:
-            key = None
+    encrypted_bytes = MODEL_BUNDLE_PATH.read_bytes()
+    if len(encrypted_bytes) != int(DEPLOYMENT_MANIFEST["bundle_bytes"]):
+        return None, "Encrypted model bundle size does not match the deployment manifest"
+    if hashlib.sha256(encrypted_bytes).hexdigest() != DEPLOYMENT_MANIFEST["bundle_sha256"]:
+        return None, "Encrypted model bundle failed the SHA-256 integrity check"
+
+    key = _load_encryption_key()
     if not key:
         return None, f"Missing deployment secret: {ENCRYPTION_KEY_NAME}"
 
     try:
-        decrypted = Fernet(str(key).encode("utf-8")).decrypt(MODEL_BUNDLE_PATH.read_bytes())
+        decrypted = Fernet(str(key).encode("utf-8")).decrypt(encrypted_bytes)
         bundle = joblib.load(io.BytesIO(decrypted))
+        missing = REQUIRED_BUNDLE_KEYS.difference(bundle)
+        if missing:
+            return None, f"Encrypted bundle is incomplete: {sorted(missing)}"
         if bundle.get("selected_features") != SELECTED_FEATURES:
             return None, "Encrypted bundle feature order does not match the application"
+        if bundle.get("schema_version") != DEPLOYMENT_MANIFEST["schema_version"]:
+            return None, "Encrypted bundle schema version does not match the manifest"
+        if bundle.get("model_parameters") != SVM_PARAMS:
+            return None, "Encrypted bundle model parameters do not match the manifest"
+        scaler_features = getattr(bundle["scaler"], "feature_names_in_", None)
+        if scaler_features is not None and list(scaler_features) != SELECTED_FEATURES:
+            return None, "Encrypted scaler feature order does not match the manifest"
+        background = np.asarray(bundle["shap_background"], dtype=float)
+        if background.ndim != 2 or background.shape[1] != len(SELECTED_FEATURES):
+            return None, "Encrypted bundle has an invalid SHAP background shape"
         return bundle, None
     except (InvalidToken, ValueError):
         return None, "Invalid deployment secret or corrupted encrypted model bundle"
@@ -157,10 +223,7 @@ def _build_scaler_from_training_data():
 def load_model():
     bundle, _ = _load_deployment_bundle()
     if bundle is not None:
-        model = bundle["model"]
-        if hasattr(model, 'feature_names_in_'):
-            del model.feature_names_in_
-        return model
+        return bundle["model"]
     return None
 
 
@@ -201,6 +264,8 @@ def get_explainer():
 scaler, scaler_msg = load_scaler()
 model = load_model()
 background = get_background_data()
+st.session_state.setdefault("prediction_made", False)
+st.session_state.setdefault("input_values", None)
 
 # ============ Medical Dashboard CSS ============
 st.markdown("""
@@ -517,10 +582,21 @@ st.markdown("""
 # Header
 st.markdown("""
 <div class="dashboard-header">
-    <h1>🧠 Intracranial Aneurysm Growth Prediction</h1>
-    <p>Clinical Decision Support System | SVM (RBF Kernel) | SHAP Explainable Analysis</p>
+    <h1>🧠 Intracranial Aneurysm Imaging-Detected Growth</h1>
+    <p>Exploratory Research Prototype | Locked SVM (RBF Kernel) | SHAP Model Explanation</p>
 </div>
 """, unsafe_allow_html=True)
+
+st.error(
+    "RESEARCH USE ONLY — Not for clinical diagnosis, treatment selection, or patient-management decisions. "
+    "This single-center, internally validated prototype has not undergone independent multicenter or "
+    "prospective validation."
+)
+st.info(
+    "Scope: conservatively managed saccular unruptured intracranial aneurysms matching the study eligibility "
+    "criteria. The output estimates the study's binary outcome of imaging-detected growth during available "
+    "follow-up (median 375 days); it is not a validated 12-month, 24-month, or lifetime risk estimate."
+)
 
 # ===== KPI Section =====
 status_icon = "✅" if model else "❌"
@@ -534,7 +610,7 @@ st.markdown(f"""
     </div>
     <div class="kpi-box status-info">
         <div class="kpi-icon">📊</div>
-        <div class="kpi-value">7</div>
+        <div class="kpi-value">{len(SELECTED_FEATURES)}</div>
         <div class="kpi-label">Features</div>
     </div>
     <div class="kpi-box status-{'good' if scaler else 'warning'}">
@@ -544,7 +620,7 @@ st.markdown(f"""
     </div>
     <div class="kpi-box status-info">
         <div class="kpi-icon">🎯</div>
-        <div class="kpi-value">RBF</div>
+        <div class="kpi-value">{str(SVM_PARAMS['kernel']).upper()}</div>
         <div class="kpi-label">SVM Kernel</div>
     </div>
 </div>
@@ -556,7 +632,7 @@ col_input, col_result = st.columns([2, 3], gap="large")
 # ===== Left Column - Input =====
 with col_input:
     # Quick Guide Card
-    st.markdown("""
+    st.markdown(f"""
     <div class="card">
         <div class="card-header">
             <div class="card-header-icon">📋</div>
@@ -565,11 +641,11 @@ with col_input:
         <div style="font-size:14px; color:var(--text-secondary); line-height:1.8;">
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
                 <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">1</span>
-                <span>Input the <strong>7 LASSO-selected morphological features</strong> of the aneurysm</span>
+                <span>Input the <strong>{len(SELECTED_FEATURES)} features selected by the final SVM pipeline</strong></span>
             </div>
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
                 <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">2</span>
-                <span>Click <strong>"Start Prediction"</strong> to run the analysis</span>
+                <span>Click <strong>"Generate research output"</strong> to run the locked model</span>
             </div>
             <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
                 <span style="background:#EDE7F6; color:#651FFF; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">3</span>
@@ -579,14 +655,18 @@ with col_input:
         <div style="margin-top:16px; padding-top:16px; border-top:1px solid #E2E8F0;">
             <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
                 <span>💡</span>
-                <span>Values are standardized before prediction. SVM with probability calibration.</span>
+                <span>Continuous values are standardized with the locked training-derived transformer; binary values remain 0/1.</span>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
+    # Batch all feature edits so the displayed result changes only after an
+    # explicit submission.
+    input_form = st.form("prediction_form", border=False)
+
     # Feature Input Card
-    st.markdown("""
+    input_form.markdown("""
     <div class="card">
         <div class="card-header">
             <div class="card-header-icon">📝</div>
@@ -601,7 +681,7 @@ with col_input:
     input_values = {}
     for feature in SELECTED_FEATURES:
         info = FEATURE_INFO[feature]
-        st.markdown(f"""
+        input_form.markdown(f"""
         <div class="feature-group">
             <div class="feature-label">
                 <span class="feature-icon">{info['icon']}</span>
@@ -613,34 +693,56 @@ with col_input:
         """, unsafe_allow_html=True)
 
         help_text = info['help']
-        st.markdown(
+        input_form.markdown(
             f'<span style="font-size:12px; color:#A0AEC0;">{help_text}</span>',
             unsafe_allow_html=True
         )
 
         min_val, max_val = feature_ranges[feature]
         default_v = feature_defaults[feature]
-        input_values[feature] = st.number_input(
-            f"{info['label']}",
-            value = default_v,
-            format = "%.4f",
-            key = feature,
-            label_visibility = "collapsed"
+        input_form.caption(
+            f"Observed complete-cohort input range: {min_val:.4f} to {max_val:.4f}. "
+            "The prototype does not extrapolate beyond this range."
         )
+        if feature in BINARY_FEATURES:
+            binary_labels = ["No (0)", "Yes (1)"]
+            selected_binary = input_form.selectbox(
+                f"{info['label']}",
+                binary_labels,
+                index=int(round(default_v)),
+                key=feature,
+                label_visibility="collapsed",
+            )
+            input_values[feature] = float(binary_labels.index(selected_binary))
+        else:
+            input_values[feature] = input_form.number_input(
+                f"{info['label']}",
+                min_value=float(min_val),
+                max_value=float(max_val),
+                value=default_v,
+                format="%.4f",
+                key=feature,
+                label_visibility="collapsed",
+            )
 
         # Real-time validation
         if (
                 input_values[feature] < min_val
                 or input_values[feature] > max_val
         ):
-            st.warning(
+            input_form.warning(
                 f"⚠️ {info['label']} is outside the recommended range "
                 f"({min_val:.4f}–{max_val:.4f}). "
                 f"Please verify the entered value."
             )
 
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-    predict_clicked = st.button("🔬 Start Prediction", width="stretch")
+    input_form.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+    predict_clicked = input_form.form_submit_button(
+        "Generate research output",
+        icon=":material/science:",
+        type="primary",
+        width="stretch",
+    )
     if predict_clicked:
         # Input Validation
         validation_errors = []
@@ -664,8 +766,8 @@ with col_input:
                 """
                 Input validation failed.
 
-                One or more parameters are outside the validated operating range of the prediction model.
-                Predictions generated using out-of-range values may be unreliable.
+                One or more parameters are outside the observed range of the complete study cohort.
+                The research prototype does not generate extrapolated outputs.
 
                 Please review the following entries:
                 """
@@ -677,7 +779,7 @@ with col_input:
             st.stop()
         # Continue Prediction
         st.session_state.prediction_made = True
-        st.session_state.input_values = input_values
+        st.session_state.input_values = dict(input_values)
 
     # ---- SVM Model Parameters Card ----
     with st.expander("⚙️ SVM Model Parameters", expanded=False):
@@ -701,7 +803,8 @@ with col_result:
             st.error(f"❌ SVM model unavailable. {scaler_msg}")
         else:
             # ---- Prepare input data ----
-            input_array = np.array([[input_values[f] for f in SELECTED_FEATURES]])
+            submitted_inputs = st.session_state.input_values
+            input_array = np.array([[submitted_inputs[f] for f in SELECTED_FEATURES]])
             input_df = pd.DataFrame(input_array, columns=SELECTED_FEATURES)
 
             # ---- Apply scaler ----
@@ -728,41 +831,9 @@ with col_result:
             # st.write(scaler.scale_)
 
             # ---- Predict ----
-            prediction = model.predict(X_input)[0]
             proba = model.predict_proba(X_input)[0]
-            #is_growth = prediction == 1
-            #confidence = max(proba) * 100
             growth_prob = proba[1] * 100
             no_growth_prob = proba[0] * 100
-
-            # st.write("growth_prob:")
-            # st.write(growth_prob)
-
-            #confidence = abs(growth_prob - 50) * 2
-            is_growth = growth_prob >= 50
-
-            # st.write("classes =", model.classes_)
-            # st.write("proba =", proba)
-            # st.write("prediction =", prediction)
-            # st.write("X_input =", X_input)
-            # st.write("decision =", model.decision_function(X_input))
-            #
-            # scaler, scaler_msg = load_scaler()
-            # st.write("scaler =", scaler)
-            # st.write("scaler_msg =", scaler_msg)
-
-            def get_risk_category(prob):
-                if prob < 0.2:
-                    return "Low"
-                elif prob < 0.5:
-                    return "Moderate"
-                elif prob < 0.8:
-                    return "High"
-                else:
-                    return "Very High"
-
-            raw_growth_prob = proba[1]
-            risk_category = get_risk_category(raw_growth_prob)
 
             # ---- Result Header ----
             st.markdown("""
@@ -772,65 +843,27 @@ with col_result:
             </div>
             """, unsafe_allow_html=True)
 
-            # ---- Main Result Card ----
-            if is_growth:
-                st.markdown(f"""
-                <div class="result-card result-positive">
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                        <span style="font-size:32px;">⚠️</span>
-                        <div>
-                            <div style="font-size:22px; font-weight:700; color:#C53030;">Aneurysm Growth Risk Detected</div>
-                            <div style="font-size:14px; color:#9B2C2C;">SVM model indicates high probability of aneurysm growth</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="result-card result-negative">
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                        <span style="font-size:32px;">✅</span>
-                        <div>
-                            <div style="font-size:22px; font-weight:700; color:#276749;">Low Growth Risk</div>
-                            <div style="font-size:14px; color:#2F855A;">SVM model indicates low probability of aneurysm growth</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+            st.warning(
+                "This output is a model-estimated probability for research demonstration only. "
+                "No clinical risk categories or action thresholds have been validated."
+            )
 
-            # ---- KPI Metrics ----
-            m1, m2, m3 = st.columns(3)
+            # ---- Model Output Metrics ----
+            m1, m2 = st.columns(2)
             with m1:
-                if risk_category == "Low":
-                    status_cls = "good"
-                elif risk_category == "Moderate":
-                    status_cls = "info"
-                elif risk_category == "High":
-                    status_cls = "warning"
-                else:  # Very High
-                    status_cls = "danger"
-
                 st.markdown(f"""
-                <div class="kpi-box status-{status_cls}">
-                    <div class="kpi-icon">🏷️</div>
-                    <div class="kpi-value">{risk_category}</div>
-                    <div class="kpi-label">Risk Category</div>
+                <div class="kpi-box status-info">
+                    <div class="kpi-icon">🎯</div>
+                    <div class="kpi-value">{growth_prob:.1f}%</div>
+                    <div class="kpi-label">Imaging-detected growth output</div>
                 </div>
                 """, unsafe_allow_html=True)
             with m2:
                 st.markdown(f"""
-                <div class="kpi-box status-success">
+                <div class="kpi-box status-good">
                     <div class="kpi-icon">🛡️</div>
                     <div class="kpi-value">{no_growth_prob:.1f}%</div>
-                    <div class="kpi-label">Stable</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with m3:
-                st.markdown(f"""
-                <div class="kpi-box status-{'danger' if growth_prob > 50 else 'info'}">
-                    <div class="kpi-icon">🎯</div>
-                    <div class="kpi-value">{growth_prob:.1f}%</div>
-                    <div class="kpi-label">Growth Risk</div>
+                    <div class="kpi-label">Without detected growth output</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -838,10 +871,10 @@ with col_result:
             st.markdown(f"""
             <div class="result-card" style="margin-top:20px;">
                 <div style="font-size:14px; font-weight:600; color:var(--text-secondary); margin-bottom:12px;">
-                    Growth Probability
+                    Model-estimated probability of imaging-detected growth
                 </div>
                 <div class="custom-progress">
-                    <div class="custom-progress-fill {'danger' if growth_prob > 50 else 'success'}"
+                    <div class="custom-progress-fill {'danger' if growth_prob >= 50 else 'success'}"
                          style="width: {growth_prob}%;"></div>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted);">
@@ -851,6 +884,12 @@ with col_result:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+            st.caption(
+                "Outcome definition in the study: ≥1 mm increase in maximum diameter, >0.5 mm increase in two "
+                "perpendicular diameters, or >10% relative increase in volume under the same imaging modality. "
+                "The estimate must not be interpreted as causal or used to determine surveillance or treatment."
+            )
 
             # ===== SHAP Explainability Analysis =====
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
@@ -1012,7 +1051,7 @@ with col_result:
                 <div class="empty-state-icon">🩺</div>
                 <div class="empty-state-text">
                     Enter patient features on the left panel<br>
-                    then click <strong>"Start Prediction"</strong> to analyze
+                    then click <strong>"Generate research output"</strong>
                 </div>
             </div>
         </div>
@@ -1044,14 +1083,15 @@ with st.sidebar:
         st.markdown(f"- `{key}` = `{val}`")
 
 # Footer
-st.markdown("""
+st.markdown(f"""
 <div class="dashboard-footer">
     <div style="margin-bottom:8px;">
         <span class="info-badge">🧠 SVM · RBF Kernel</span>
-        <span class="info-badge">📊 7 Features</span>
-        <span class="info-badge">🔬 Research Use Only</span>
+        <span class="info-badge">📊 {len(SELECTED_FEATURES)} Features</span>
+        <span class="info-badge">🔬 RESEARCH USE ONLY</span>
     </div>
     <p>Intracranial Aneurysm Growth Prediction Dashboard v2.0</p>
-    <p>SVM Model · SHAP KernelExplainer · Not for clinical diagnosis</p>
+    <p>Not for clinical diagnosis, treatment selection, surveillance planning, or patient-management decisions</p>
+    <p>Single-center internal validation only · Independent multicenter and prospective validation required</p>
 </div>
 """, unsafe_allow_html=True)
